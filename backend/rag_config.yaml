@@ -1,0 +1,77 @@
+# =============================================================================
+#  rag_config.yaml — customise BOTH pipelines here. Every key is optional;
+#  anything you leave out falls back to the built-in default (see rag_core/config.py).
+#  Changing an *ingestion* setting automatically re-indexes the affected files on the next run.
+# =============================================================================
+
+paths:
+  resumes_dir: resumes        # <- drop your resumes (PDF / DOCX / TXT / MD) in here: 1, 40, 50, 500...
+  data_dir: data              # ingestion manifest
+  chroma_dir: chroma_db       # legacy ChromaDB folder (only used if retrieval.store is set to chroma)
+
+plugins: []                   # e.g. ["plugins.example_plugin"] to load your own chunker/embedder/reranker/...
+
+# ------------------------------------------------------------------ POSTGRESQL + PGVECTOR
+postgres:
+  url: ""                     # optional full DSN: postgresql://postgres:postgres@localhost:5432/rag_db (or set DATABASE_URL in .env)
+  host: localhost
+  port: 5432
+  dbname: rag_db
+  user: postgres
+  password: postgres
+  table: rag_chunks
+  index_type: hnsw            # hnsw (vector_cosine_ops) | none
+
+# ------------------------------------------------------------------ PIPELINE 1: INGESTION
+ingestion:
+  extensions: [.pdf, .docx, .txt, .md]
+  recursive: true             # also read sub-folders
+  max_file_mb: 15
+  auto_ingest_on_start: true  # incremental ingest in the background when the server boots
+  incremental: true           # skip unchanged files (hash of content + settings)
+  delete_missing: true        # files removed from the folder are removed from the index
+  workers: 4                  # parallel load/parse/chunk
+
+  candidate_name_source: auto # auto = name found in the resume text, else the file name | text | filename
+  chunker: section            # section = one chunk per section / job / project   |  fixed = sliding window
+  chunk:
+    max_chars: 1200
+    overlap_chars: 150
+    min_chars: 80
+    split_entries: [EXPERIENCE, PROJECTS]    # sections split into one chunk per role / project
+
+  # Teach the parser your resume headings (canonical name -> aliases it should recognise)
+  # section_aliases:
+  #   EXPERIENCE: [experience, work experience, professional experience, career]
+  #   SKILLS: [skills, technical skills, tech stack]
+  detect_unknown_headers: false   # true = treat unknown ALL-CAPS short lines as new sections
+
+  embedder: local              # auto (Gemini if GEMINI_API_KEY is set, else offline) | gemini | local
+  embed_batch_size: 50        # chunks per Gemini call (max 100) -> 50 resumes ~ 10 API calls
+  embedding_dims: 768
+  fallback_to_local: true     # Gemini down? index offline instead of failing
+
+# ------------------------------------------------------------------ PIPELINE 2: RETRIEVAL
+retrieval:
+  store: pgvector             # pgvector (PostgreSQL + pgvector extension) | chroma | memory
+  candidate_detection: true   # "tell me about Ali Khan" -> search only Ali Khan's resume
+  profile_mode: true          # named candidate -> send their WHOLE resume to the LLM
+  candidate_limit: 6          # pool-wide questions: how many resumes the LLM sees
+  max_chunks_per_candidate: 4 # ...and how many of each resume's best chunks
+  fetch_k: 80                 # candidates pulled from each of vector search / keyword search
+  weights: {semantic: 0.55, keyword: 0.45}
+  context_max_chars: 16000    # prompt budget for resume context
+  history_turns: 6
+  reranker: none              # name of a registered reranker plugin
+  # synonyms: [...]           # query expansion rules, see rag_core/config.py for the format
+
+# ------------------------------------------------------------------ ANSWER GENERATION
+generation:
+  generator: gemini
+  models: [gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-3.6-flash]  # tried in order
+  temperature: 0.3
+  # system_prompt: |            # placeholders: {today} {total} {shown}
+  #   You are a recruiter's assistant for {total} resumes...
+
+gemini:
+  embed_model: gemini-embedding-004

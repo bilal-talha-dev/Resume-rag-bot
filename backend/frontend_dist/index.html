@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG AI — Multi-Resume Recruiting Assistant</title>
+
+  <link rel="icon" type="image/svg+xml"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2341431B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='4' width='16' height='16' rx='2'/><rect x='9' y='9' width='6' height='6'/></svg>" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            palette: {
+              deep: '#41431B',    // Action buttons, user pills, dark text
+              sage: '#AEB784',    // Mid Sage - Borders, accents, active states
+              sand: '#E3DBBB',    // Warm Sand - Base background
+              cream: '#F8F3E1',   // Soft Cream - Chat bubbles & inner modal cards
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+
+<body class="bg-[#E3DBBB] text-[#41431B] antialiased overflow-hidden font-sans selection:bg-[#AEB784] selection:text-[#41431B]">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    const makeIcon = (d) => ({ className = "w-4 h-4" }) => (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {d}
+      </svg>
+    );
+
+    const Send = makeIcon(<><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></>);
+    const FileText = makeIcon(<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>);
+    const Database = makeIcon(<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>);
+    const Cpu = makeIcon(<><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></>);
+    const Search = makeIcon(<><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>);
+    const Copy = makeIcon(<><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>);
+    const Check = makeIcon(<><polyline points="20 6 9 17 4 12" /></>);
+    const Sparkles = makeIcon(<><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z" /></>);
+    const ChevronRight = makeIcon(<><polyline points="9 18 15 12 9 6" /></>);
+    const GitBranch = makeIcon(<><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></>);
+    const X = makeIcon(<><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>);
+    const Plus = makeIcon(<><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>);
+    const ArrowRight = makeIcon(<><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></>);
+    const ArrowDown = makeIcon(<><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></>);
+    const PanelLeftClose = makeIcon(<><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /><path d="m16 15-3-3 3-3" /></>);
+    const PanelLeft = makeIcon(<><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /></>);
+
+    function cleanMarkdownText(text) {
+      if (!text) return '';
+      return text
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/^#+\s+/gm, '')
+        .replace(/^\s*[-–—]\s+/gm, '')
+        .trim();
+    }
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'kb'
+      const [telemetryModalOpen, setTelemetryModalOpen] = useState(false);
+      const [selectedFlowStage, setSelectedFlowStage] = useState(null);
+      const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
+
+      const [backendUrl, setBackendUrl] = useState('');
+      const [backendStatus, setBackendStatus] = useState('connected');
+      const [vectorDb, setVectorDb] = useState([]);
+      const [candidatesCount, setCandidatesCount] = useState(51);
+      const [embeddingModelUsed, setEmbeddingModelUsed] = useState('PostgreSQL + pgvector (HNSW)');
+      const [kbSearch, setKbSearch] = useState('');
+      const [copiedId, setCopiedId] = useState(null);
+
+      const [inputQuery, setInputQuery] = useState('');
+      const [isLoading, setIsLoading] = useState(false);
+      const [messages, setMessages] = useState([]);
+      const [activeTelemetry, setActiveTelemetry] = useState(null);
+      const chatEndRef = useRef(null);
+
+      useEffect(() => {
+        const handleResize = () => {
+          if (window.innerWidth < 768) {
+            setSidebarOpen(false);
+          }
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+      }, []);
+
+      useEffect(() => {
+        detectDjangoBackend();
+      }, []);
+
+      useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, [messages, isLoading]);
+
+      async function detectDjangoBackend() {
+        setBackendStatus('checking');
+        try {
+          const r1 = await fetch('/api/health');
+          if (r1.ok) {
+            const d1 = await r1.json();
+            if (d1?.status === 'ok') {
+              setBackendUrl('');
+              setBackendStatus('connected');
+              if (d1.vector_db) setEmbeddingModelUsed(d1.vector_db);
+              if (d1.candidates_indexed) setCandidatesCount(d1.candidates_indexed);
+              loadBackendChunks('');
+              return true;
+            }
+          }
+        } catch {}
+
+        try {
+          const base = 'http://localhost:8000';
+          const res = await fetch(`${base}/api/health`);
+          if (res.ok) {
+            const data = await res.json();
+            setBackendUrl(base);
+            setBackendStatus('connected');
+            if (data.vector_db) setEmbeddingModelUsed(data.vector_db);
+            if (data.candidates_indexed) setCandidatesCount(data.candidates_indexed);
+            loadBackendChunks(base);
+            return true;
+          }
+        } catch {}
+
+        setBackendStatus('standalone');
+        return false;
+      }
+
+      async function loadBackendChunks(baseUrl) {
+        try {
+          const r = await fetch(`${baseUrl}/api/chunks?limit=1500`);
+          if (r.ok) {
+            const d = await r.json();
+            if (Array.isArray(d.chunks) && d.chunks.length > 0) {
+              setVectorDb(d.chunks.map((c) => ({
+                id: c.id,
+                section: `${c.candidate_name} — ${c.section}`,
+                text: c.text
+              })));
+            }
+          }
+        } catch {}
+      }
+
+      async function handleAskQuestion(rawQuery) {
+        const queryText = (rawQuery ?? inputQuery).trim();
+        if (!queryText || isLoading) return;
+
+        setInputQuery('');
+        setIsLoading(true);
+
+        const userMsg = {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          content: queryText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setMessages((prev) => [...prev, userMsg]);
+
+        try {
+          let resultData = null;
+          const base = backendUrl ? backendUrl.replace(/\/$/, '') : '';
+          const res = await fetch(`${base}/api/query`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: queryText,
+              history: messages.slice(-8).map((m) => ({ role: m.role, content: m.content }))
+            })
+          });
+
+          if (res.ok) {
+            resultData = await res.json();
+          } else {
+            let detail = `HTTP ${res.status}`;
+            try { detail = (await res.json()).error || detail; } catch {}
+            resultData = {
+              answer: `Error from backend: ${detail}`,
+              used_model: 'error',
+              top_match: { id: 'err', score: 0 },
+              selected_chunks: [],
+              ranked_matches: [],
+              injected_prompt: ''
+            };
+          }
+
+          const botMsg = {
+            id: `bot-${Date.now()}`,
+            role: 'assistant',
+            content: resultData.answer,
+            telemetry: resultData,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+
+          setMessages((prev) => [...prev, botMsg]);
+          setActiveTelemetry(resultData);
+        } catch (err) {
+          setMessages((prev) => [...prev, {
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            content: `Connection error: ${err.message}. Make sure Django is running on port 8000.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }]);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+
+      function handleCopyText(id, text) {
+        const pureText = cleanMarkdownText(text);
+        try {
+          navigator.clipboard.writeText(pureText);
+        } catch {
+          const ta = document.createElement('textarea');
+          ta.value = pureText;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 1800);
+      }
+
+      const filteredChunks = useMemo(() => {
+        const q = kbSearch.trim().toLowerCase();
+        if (!q) return vectorDb;
+        return vectorDb.filter(
+          (c) =>
+            c.id.toLowerCase().includes(q) ||
+            c.section.toLowerCase().includes(q) ||
+            c.text.toLowerCase().includes(q)
+        );
+      }, [vectorDb, kbSearch]);
+
+      function renderFormattedMessage(text) {
+        const cleaned = cleanMarkdownText(text);
+        const lines = cleaned.split('\n').map((l) => l.trim()).filter(Boolean);
+
+        return (
+          <div className="space-y-3.5 text-[14.5px] leading-relaxed text-[#41431B] font-normal">
+            {lines.map((line, idx) => {
+              const lineContent = line.replace(/^[•\-\–\—\s*#]+/, '').trim();
+
+              if (idx === 0 && (lineContent.endsWith(':') || lineContent.length < 85)) {
+                return (
+                  <p key={idx} className="font-bold text-[#41431B] text-[15px] border-b border-[#AEB784]/40 pb-1.5 mb-2">
+                    {lineContent}
+                  </p>
+                );
+              }
+
+              const colonIdx = lineContent.indexOf(':');
+              if (colonIdx !== -1 && colonIdx < 50) {
+                const heading = lineContent.slice(0, colonIdx).trim();
+                const rest = lineContent.slice(colonIdx + 1).trim();
+
+                return (
+                  <div key={idx} className="space-y-0.5">
+                    <h4 className="font-bold text-[#41431B] text-[14.5px] tracking-tight">{heading}</h4>
+                    <p className="text-[#41431B]/90 pl-0 leading-relaxed">{rest}</p>
+                  </div>
+                );
+              }
+
+              return (
+                <p key={idx} className="text-[#41431B]/90 leading-relaxed">
+                  {lineContent}
+                </p>
+              );
+            })}
+          </div>
+        );
+      }
+
+      function startNewChat() {
+        setMessages([]);
+        setActiveTelemetry(null);
+        setActiveTab('chat');
+        if (window.innerWidth < 768) {
+          setSidebarOpen(false);
+        }
+      }
+
+      return (
+        <div className="h-screen w-screen bg-[#E3DBBB] text-[#41431B] flex overflow-hidden relative" style={{ height: '100dvh' }}>
+          <style>{`
+            .sage-scrollbar { scrollbar-width: thin; scrollbar-color: #AEB784 #E3DBBB; }
+            .sage-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+            .sage-scrollbar::-webkit-scrollbar-track { background: transparent; }
+            .sage-scrollbar::-webkit-scrollbar-thumb { background-color: #AEB784; border-radius: 6px; }
+            @keyframes dotpulse { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+          `}</style>
+
+          {/* ============ MOBILE BACKDROP ============ */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 bg-[#41431B]/40 z-40 backdrop-blur-xs md:hidden transition-opacity duration-200"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+
+          {/* ============ COLLAPSIBLE SAGE/CREAM SIDEBAR ============ */}
+          <aside
+            className={`
+              fixed md:relative top-0 left-0 z-50 md:z-20 h-full bg-[#F8F3E1]
+              flex flex-col flex-shrink-0 transition-all duration-300 ease-in-out select-none
+              ${sidebarOpen 
+                ? 'w-72 translate-x-0 border-r border-[#AEB784] opacity-100' 
+                : '-translate-x-full md:translate-x-0 md:w-0 border-transparent opacity-0 md:overflow-hidden pointer-events-none'
+              }
+            `}
+          >
+            <div className="w-72 h-full flex flex-col justify-between overflow-hidden">
+              
+              {/* Sidebar Header */}
+              <div className="h-14 px-4 border-b border-[#AEB784]/40 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-[#41431B] text-[#F8F3E1] flex items-center justify-center font-bold text-xs shadow-xs">
+                    R
+                  </div>
+                  <span className="font-bold text-sm tracking-wide text-[#41431B]">RAG AI</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen(false)}
+                  title="Close sidebar"
+                  className="p-1.5 rounded-lg text-[#41431B]/80 hover:bg-[#AEB784]/30 hover:text-[#41431B] transition-colors"
+                >
+                  <PanelLeftClose className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Action: New Chat */}
+              <div className="p-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={startNewChat}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-[#E3DBBB] hover:bg-[#AEB784]/40 text-[#41431B] border border-[#AEB784] font-medium text-xs transition-all shadow-xs group"
+                >
+                  <Plus className="w-4 h-4 text-[#41431B] group-hover:rotate-90 transition-transform duration-200" />
+                  <span>Start new chat</span>
+                </button>
+              </div>
+
+              {/* Navigation Items */}
+              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5 sage-scrollbar text-xs">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-[#41431B]/60 px-2 py-1 font-semibold">
+                  Navigation
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab('chat'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors text-left ${
+                    activeTab === 'chat'
+                      ? 'bg-[#41431B] text-[#F8F3E1] shadow-xs'
+                      : 'text-[#41431B] hover:bg-[#AEB784]/30'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span className="flex-1">Assistant Chat</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab('kb'); if (window.innerWidth < 768) setSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors text-left ${
+                    activeTab === 'kb'
+                      ? 'bg-[#41431B] text-[#F8F3E1] shadow-xs'
+                      : 'text-[#41431B] hover:bg-[#AEB784]/30'
+                  }`}
+                >
+                  <Database className="w-4 h-4" />
+                  <span className="flex-1 truncate">Knowledge Base Chunks</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${activeTab === 'kb' ? 'bg-[#F8F3E1]/20' : 'bg-[#AEB784]/40'}`}>
+                    {vectorDb.length || 572}
+                  </span>
+                </button>
+
+                <div className="pt-3">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-[#41431B]/60 px-2 py-1 font-semibold">
+                    Pipelines & Telemetry
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!activeTelemetry}
+                    onClick={() => {
+                      setSelectedFlowStage(null);
+                      setTelemetryModalOpen(true);
+                      if (window.innerWidth < 768) setSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors text-left ${
+                      !activeTelemetry
+                        ? 'opacity-40 cursor-not-allowed text-[#41431B]'
+                        : 'text-[#41431B] hover:bg-[#AEB784]/30'
+                    }`}
+                  >
+                    <GitBranch className="w-4 h-4" />
+                    <span className="flex-1 truncate">Flow Inspector</span>
+                    {activeTelemetry && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Sidebar Footer */}
+              <div className="shrink-0 p-3 border-t border-[#AEB784]/40 bg-[#F8F3E1]">
+                <div className="flex items-center gap-2.5 px-1 py-1">
+                  <div className="w-7 h-7 rounded-full bg-[#AEB784]/50 border border-[#AEB784] flex items-center justify-center text-[#41431B] font-bold text-[11px]">
+                    PG
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-[#41431B] truncate">PostgreSQL + pgvector</p>
+                    <p className="text-[10px] text-[#41431B]/70 truncate font-mono">{candidatesCount} Resumes Indexed</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </aside>
+
+          {/* ============ MAIN CONTENT AREA ============ */}
+          <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative transition-all duration-300">
+
+            {/* TOP HEADER */}
+            <header className="shrink-0 h-14 px-4 flex items-center justify-between border-b border-[#AEB784] bg-[#F8F3E1]/90 backdrop-blur-xs z-10">
+              <div className="flex items-center gap-2 min-w-0">
+                {!sidebarOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setSidebarOpen(true)}
+                    aria-label="Open sidebar"
+                    className="p-2 -ml-1 rounded-lg text-[#41431B] hover:bg-[#AEB784]/30 transition-colors"
+                    title="Open sidebar"
+                  >
+                    <PanelLeft className="w-5 h-5 hidden md:block" />
+                    <svg className="w-5 h-5 md:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                  </button>
+                )}
+
+                <div className="flex items-center gap-2 truncate">
+                  <h1 className="text-sm font-bold text-[#41431B] tracking-wide">
+                    {activeTab === 'chat' ? 'Assistant' : 'Knowledge Base'}
+                  </h1>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={startNewChat}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#E3DBBB] border border-[#AEB784] text-xs font-semibold text-[#41431B] hover:bg-[#AEB784]/40 transition-colors shadow-2xs"
+                  title="Start a new chat"
+                >
+                  <Plus className="w-3.5 h-3.5 text-[#41431B]" />
+                  <span className="hidden sm:inline">New Chat</span>
+                </button>
+
+                {activeTelemetry && (
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedFlowStage(null); setTelemetryModalOpen(true); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#AEB784]/35 border border-[#AEB784] text-xs font-semibold text-[#41431B] hover:bg-[#AEB784]/60 transition-colors shadow-2xs"
+                  >
+                    <GitBranch className="w-3.5 h-3.5 text-[#41431B]" />
+                    <span className="hidden sm:inline">Flow Inspector</span>
+                  </button>
+                )}
+              </div>
+            </header>
+
+            {/* TAB CONTENT */}
+            <div className="flex-1 min-h-0 w-full overflow-hidden flex flex-col">
+              <main className="w-full flex-1 flex flex-col h-full min-h-0">
+                
+                {/* ACTIVE TAB: CHAT */}
+                {activeTab === 'chat' && (
+                  <div className="flex-1 flex flex-col justify-between w-full h-full min-h-0 overflow-hidden">
+                    <div className="flex-1 overflow-y-auto sage-scrollbar px-3 sm:px-6 py-4 flex flex-col items-center">
+                      <div className="w-full max-w-3xl flex-1 flex flex-col space-y-5">
+                        
+                        {messages.length === 0 && (
+                          <div className="my-auto py-16 flex flex-col items-center justify-center text-center px-4">
+                            <div className="w-12 h-12 rounded-2xl bg-[#F8F3E1] border border-[#AEB784] flex items-center justify-center text-[#41431B] mb-4 shadow-sm">
+                              <Cpu className="w-6 h-6" />
+                            </div>
+                            <h2 className="text-xl sm:text-2xl font-bold text-[#41431B]">
+                              Multi-Resume AI Recruiting Assistant
+                            </h2>
+                            <p className="text-sm text-[#41431B]/80 mt-1.5">
+                              Ask across all {candidatesCount} indexed resumes in PostgreSQL + pgvector.
+                            </p>
+                          </div>
+                        )}
+
+                        {messages.map((msg) => (
+                          <div key={msg.id} className={`flex flex-col w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                            {msg.role === 'user' ? (
+                              <div className="max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-[15px] leading-7 bg-[#41431B] text-[#F8F3E1] shadow-sm">
+                                {msg.content}
+                              </div>
+                            ) : (
+                              <>
+                                <div className="text-xs font-bold text-[#41431B] ml-1 mb-1 tracking-wider uppercase font-mono flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5" /> Assistant
+                                </div>
+                                <div className="max-w-[95%] sm:max-w-[90%] rounded-2xl rounded-bl-md px-5 py-4 bg-[#F8F3E1] border border-[#AEB784] text-[#41431B] shadow-xs">
+                                  {renderFormattedMessage(msg.content)}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyText(msg.id, msg.content)}
+                                  className="mt-1.5 ml-1 text-[11px] text-[#41431B]/70 hover:text-[#41431B] flex items-center gap-1 transition-colors"
+                                >
+                                  {copiedId === msg.id ? <Check className="w-3 h-3 text-[#41431B]" /> : <Copy className="w-3 h-3" />}
+                                  <span>{copiedId === msg.id ? 'Copied' : 'Copy'}</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ))}
+
+                        {isLoading && (
+                          <div className="flex flex-col items-start">
+                            <div className="text-xs font-bold text-[#41431B] ml-1 mb-1 tracking-wider uppercase font-mono flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5" /> Assistant
+                            </div>
+                            <div className="flex items-center gap-1.5 px-4 py-3 rounded-2xl bg-[#F8F3E1] border border-[#AEB784] w-fit shadow-xs">
+                              {[0, 1, 2].map((d) => (
+                                <span key={d} className="w-1.5 h-1.5 rounded-full bg-[#41431B]" style={{ animation: 'dotpulse 1.2s infinite', animationDelay: `${d * 0.2}s` }} />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div ref={chatEndRef} />
+                      </div>
+                    </div>
+
+                    {/* Bottom Input Area */}
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); handleAskQuestion(); }}
+                      className="w-full flex justify-center pb-4 pt-2 px-3 sm:px-6 bg-[#E3DBBB] shrink-0"
+                    >
+                      <div className="w-full max-w-3xl flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={inputQuery}
+                          onChange={(e) => setInputQuery(e.target.value)}
+                          placeholder={`Ask across all ${candidatesCount} indexed resumes…`}
+                          className="flex-1 bg-[#F8F3E1] border border-[#AEB784] rounded-full px-5 py-3 text-sm text-[#41431B] placeholder-[#41431B]/60 focus:outline-none focus:border-[#41431B] shadow-xs transition-colors"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isLoading || !inputQuery.trim()}
+                          aria-label="Send"
+                          className="w-11 h-11 shrink-0 rounded-full bg-[#41431B] hover:bg-[#323414] disabled:bg-[#AEB784] disabled:text-[#F8F3E1]/60 text-[#F8F3E1] flex items-center justify-center transition-colors shadow-xs"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* ACTIVE TAB: KNOWLEDGE BASE */}
+                {activeTab === 'kb' && (
+                  <div className="p-3 sm:p-6 flex-1 flex flex-col min-h-0">
+                    <div className="bg-[#F8F3E1] border border-[#AEB784] rounded-xl p-4 sm:p-5 flex-1 flex flex-col shadow-xs overflow-hidden">
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#AEB784] shrink-0">
+                        <div>
+                          <h2 className="text-base font-bold text-[#41431B] flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-[#41431B]" />
+                            Indexed Resume Chunks
+                          </h2>
+                          <p className="text-xs text-[#41431B]/70 mt-0.5 font-mono">
+                            {vectorDb.length || 572} semantic chunks stored in PostgreSQL + pgvector
+                          </p>
+                        </div>
+
+                        <div className="relative w-full sm:w-72">
+                          <Search className="w-4 h-4 text-[#41431B]/60 absolute left-3 top-2.5" />
+                          <input
+                            type="text"
+                            value={kbSearch}
+                            onChange={(e) => setKbSearch(e.target.value)}
+                            placeholder="Filter chunks by keyword..."
+                            className="w-full bg-[#E3DBBB]/40 border border-[#AEB784] rounded-lg pl-9 pr-3 py-2 text-xs text-[#41431B] placeholder-[#41431B]/60 focus:outline-none focus:border-[#41431B]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto sage-scrollbar mt-4 pr-1">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {filteredChunks.map((chunk) => (
+                            <div
+                              key={chunk.id}
+                              className="bg-[#E3DBBB]/30 border border-[#AEB784] rounded-lg p-3.5 flex flex-col justify-between gap-3"
+                            >
+                              <div>
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                  <span className="px-2 py-0.5 rounded bg-[#AEB784]/40 border border-[#AEB784] font-mono text-xs font-bold text-[#41431B]">
+                                    {chunk.id}
+                                  </span>
+                                  <span className="text-xs font-semibold text-[#41431B] truncate">
+                                    {chunk.section}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-[#41431B]/90 leading-relaxed">
+                                  {cleanMarkdownText(chunk.text)}
+                                </p>
+                              </div>
+
+                              <div className="pt-2 border-t border-[#AEB784] flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveTab('chat');
+                                    handleAskQuestion(`Tell me about ${chunk.section}.`);
+                                  }}
+                                  className="text-xs font-medium text-[#41431B] hover:underline flex items-center gap-1"
+                                >
+                                  Ask About This <ChevronRight className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </main>
+            </div>
+
+          </div>
+
+          {/* ============ FLOW ARCHITECTURE INSPECTOR MODAL ============ */}
+          {telemetryModalOpen && activeTelemetry && (
+            <div className="fixed inset-0 z-50 bg-[#41431B]/40 flex items-center justify-center p-3 sm:p-4 backdrop-blur-xs">
+              <div className="bg-[#E3DBBB] border border-[#AEB784] rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+
+                <div className="px-5 py-4 bg-[#F8F3E1] border-b border-[#AEB784] flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-[#E3DBBB] border border-[#AEB784] flex items-center justify-center text-[#41431B]">
+                      <GitBranch className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-[#41431B]">
+                        RAG Pipeline Flow Architecture
+                      </h3>
+                      <p className="text-[12px] text-[#41431B]/80">
+                        Query vectorization, PostgreSQL pgvector cosine match, prompt augmentation, and synthesized output
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTelemetryModalOpen(false)}
+                    className="p-1.5 rounded-lg bg-[#E3DBBB] hover:bg-[#AEB784]/40 border border-[#AEB784] text-[#41431B]"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5 space-y-4 sage-scrollbar bg-[#E3DBBB]">
+                  <div className="p-4 sm:p-5 bg-[#F8F3E1] border border-[#AEB784] rounded-xl shadow-xs">
+                    <div className="flex items-center justify-between mb-4 text-[11px] font-mono text-[#41431B]/80 uppercase tracking-wider">
+                      <span>Execution Diagram (Click any stage to view payload)</span>
+                      <span className="text-[#41431B] font-bold">{activeTelemetry.used_model}</span>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFlowStage(selectedFlowStage === 'stage1' ? null : 'stage1')}
+                        className={`flex-1 p-3 rounded-xl border text-left transition-all ${
+                          selectedFlowStage === 'stage1'
+                            ? 'bg-[#AEB784]/50 border-[#41431B] ring-2 ring-[#41431B]/30'
+                            : 'bg-[#E3DBBB]/70 border-[#AEB784] hover:border-[#41431B]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-mono mb-1">
+                          <span className="text-[#41431B] font-bold">1. VECTORIZE</span>
+                          <span className="text-[#41431B]/70">{activeTelemetry.query_embed_time_s || 0.01}s</span>
+                        </div>
+                        <div className="text-xs font-bold text-[#41431B]">Query Vector</div>
+                        <div className="text-[11px] text-[#41431B]/80 truncate mt-0.5 font-mono">768-dim float</div>
+                      </button>
+
+                      <div className="flex items-center justify-center text-[#41431B] opacity-70 shrink-0">
+                        <span className="hidden md:block"><ArrowRight className="w-4 h-4" /></span>
+                        <span className="md:hidden"><ArrowDown className="w-4 h-4" /></span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFlowStage(selectedFlowStage === 'stage2' ? null : 'stage2')}
+                        className={`flex-1 p-3 rounded-xl border text-left transition-all ${
+                          selectedFlowStage === 'stage2'
+                            ? 'bg-[#AEB784]/50 border-[#41431B] ring-2 ring-[#41431B]/30'
+                            : 'bg-[#E3DBBB]/70 border-[#AEB784] hover:border-[#41431B]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-mono mb-1">
+                          <span className="text-[#41431B] font-bold">2. RETRIEVE</span>
+                          <span className="text-[#41431B] font-bold">{activeTelemetry.vector_db || 'pgvector'}</span>
+                        </div>
+                        <div className="text-xs font-bold text-[#41431B]">Cosine Match</div>
+                        <div className="text-[11px] text-[#41431B] truncate mt-0.5 font-mono">• {activeTelemetry.candidates?.length || 0} candidates</div>
+                      </button>
+
+                      <div className="flex items-center justify-center text-[#41431B] opacity-70 shrink-0">
+                        <span className="hidden md:block"><ArrowRight className="w-4 h-4" /></span>
+                        <span className="md:hidden"><ArrowDown className="w-4 h-4" /></span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFlowStage(selectedFlowStage === 'stage3' ? null : 'stage3')}
+                        className={`flex-1 p-3 rounded-xl border text-left transition-all ${
+                          selectedFlowStage === 'stage3'
+                            ? 'bg-[#AEB784]/50 border-[#41431B] ring-2 ring-[#41431B]/30'
+                            : 'bg-[#E3DBBB]/70 border-[#AEB784] hover:border-[#41431B]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-mono mb-1">
+                          <span className="text-[#41431B] font-bold">3. AUGMENT</span>
+                          <span className="text-[#41431B]/70">{activeTelemetry.selected_chunks?.length || 0} Chunks</span>
+                        </div>
+                        <div className="text-xs font-bold text-[#41431B]">Prompt Inject</div>
+                        <div className="text-[11px] text-[#41431B]/80 truncate mt-0.5">Strict grounding</div>
+                      </button>
+
+                      <div className="flex items-center justify-center text-[#41431B] opacity-70 shrink-0">
+                        <span className="hidden md:block"><ArrowRight className="w-4 h-4" /></span>
+                        <span className="md:hidden"><ArrowDown className="w-4 h-4" /></span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFlowStage(selectedFlowStage === 'stage4' ? null : 'stage4')}
+                        className={`flex-1 p-3 rounded-xl border text-left transition-all ${
+                          selectedFlowStage === 'stage4'
+                            ? 'bg-[#AEB784]/50 border-[#41431B] ring-2 ring-[#41431B]/30'
+                            : 'bg-[#E3DBBB]/70 border-[#AEB784] hover:border-[#41431B]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-[10px] font-mono mb-1">
+                          <span className="text-[#41431B] font-bold">4. GENERATE</span>
+                          <span className="text-[#41431B]/70">{activeTelemetry.generation_time_s || 0.08}s</span>
+                        </div>
+                        <div className="text-xs font-bold text-[#41431B]">LLM Output</div>
+                        <div className="text-[11px] text-[#41431B] truncate mt-0.5">Verified answer</div>
+                      </button>
+                    </div>
+
+                    {!selectedFlowStage && (
+                      <p className="text-center text-xs text-[#41431B]/70 mt-3 italic">
+                        Click on any stage above to inspect its real-time payload.
+                      </p>
+                    )}
+                  </div>
+
+                  {selectedFlowStage && (
+                    <div className="bg-[#F8F3E1] border border-[#AEB784] rounded-xl p-4 shadow-xs transition-all">
+                      <div className="flex items-center justify-between pb-2 mb-3 border-b border-[#AEB784]">
+                        <span className="text-xs font-bold text-[#41431B]">
+                          {selectedFlowStage === 'stage1' && 'Stage 1: User Query Vector Space Projection'}
+                          {selectedFlowStage === 'stage2' && 'Stage 2: Top Cosine Similarity Rankings (PostgreSQL pgvector)'}
+                          {selectedFlowStage === 'stage3' && 'Stage 3: Augmented Grounding Prompt'}
+                          {selectedFlowStage === 'stage4' && 'Stage 4: Synthesized Natural Answer'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFlowStage(null)}
+                          className="text-[11px] text-[#41431B] font-semibold underline hover:opacity-80"
+                        >
+                          Hide details
+                        </button>
+                      </div>
+
+                      {selectedFlowStage === 'stage1' && (
+                        <div className="space-y-3">
+                          <div className="text-xs text-[#41431B]">
+                            Query: <span className="font-semibold text-[#41431B]">"{activeTelemetry.query}"</span>
+                          </div>
+                          <div className="p-3 rounded-lg bg-[#E3DBBB]/70 border border-[#AEB784] font-mono text-xs text-[#41431B]">
+                            Sample Vector (First 4 dimensions):<br />
+                            [{(activeTelemetry.query_vector_sample || []).map((v) => Number(v).toFixed(4)).join(', ')}, ...]
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedFlowStage === 'stage2' && (
+                        <div className="space-y-2">
+                          {(activeTelemetry.ranked_matches || []).slice(0, 6).map((item) => (
+                            <div key={item.id} className="p-2.5 rounded-lg bg-[#E3DBBB]/70 border border-[#AEB784] flex items-center justify-between gap-3 text-xs">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-mono text-[#41431B] font-bold">{item.candidate_name || item.id}</span>
+                                <span className="text-[#41431B] truncate">{item.section}</span>
+                              </div>
+                              <span className="font-mono font-bold text-[#41431B]">{item.score.toFixed(4)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {selectedFlowStage === 'stage3' && (
+                        <div className="space-y-2">
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyText('prompt', activeTelemetry.injected_prompt)}
+                              className="text-xs px-2.5 py-1 rounded bg-[#E3DBBB] hover:bg-[#AEB784]/40 text-[#41431B] border border-[#AEB784]"
+                            >
+                              {copiedId === 'prompt' ? 'Copied' : 'Copy Prompt'}
+                            </button>
+                          </div>
+                          <pre className="p-3 rounded-lg bg-[#E3DBBB]/70 border border-[#AEB784] text-[11px] font-mono text-[#41431B] whitespace-pre-wrap max-h-56 overflow-y-auto sage-scrollbar">
+                            {activeTelemetry.injected_prompt}
+                          </pre>
+                        </div>
+                      )}
+
+                      {selectedFlowStage === 'stage4' && (
+                        <div className="p-3 rounded-lg bg-[#E3DBBB]/70 border border-[#AEB784] text-sm">
+                          {renderFormattedMessage(activeTelemetry.answer)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,15 @@
+"""
+Convenience launcher: starts the Django + WhiteNoise server on port 8000.
+You can run either:
+  python manage.py runserver
+or:
+  python server.py
+"""
+import os
+import sys
+
+if __name__ == "__main__":
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rag_project.settings")
+    from django.core.management import execute_from_command_line
+    args = sys.argv if len(sys.argv) > 1 else [sys.argv[0], "runserver", "0.0.0.0:8000"]
+    execute_from_command_line(args)

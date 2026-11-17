@@ -1,0 +1,32 @@
+Waleed Pasha
+Senior Full-Stack Software Engineer (Software, Data & IT) | Lahore
+waleed.pasha37@example.com | +92 321 9087123 | linkedin.com/in/waleed-pasha-37
+PROFESSIONAL SUMMARY
+Accomplished Senior Full-Stack Software Engineer with 13 years of progressive experience in Software, Data & IT across Devsinc and Techlogix. Proven expertise in Python, Django, and FastAPI, delivering measurable operational and financial impact in Lahore.
+WORK EXPERIENCE
+Senior Full-Stack Software Engineer | Devsinc | Mar 2017 – Present
+• Designed REST and GraphQL APIs, normalized relational schemas, and optimized slow PostgreSQL queries via composite indexing.
+• Implemented automated pytest and Playwright CI pipelines, maintaining 91% test coverage across core services.
+• Mentored 5 junior developers through pair programming and architectural RFC reviews.
+Backend Engineer | Techlogix | Jul 2015 – Feb 2017
+• Spearheaded departmental workflows in Python, Django, and Next.js, improving operational KPIs by 38%.
+• Collaborated with senior leadership at Techlogix to standardize reporting, audit readiness, and staff training across regional teams.
+Junior Web Developer | Educative | Sep 2013 – Jun 2015
+• Supported day-to-day execution in FastAPI and TypeScript, maintaining 99%+ accuracy across documentation and stakeholder deliverables.
+PROJECTS
+Multi-Vendor B2B Marketplace & Escrow Engine | Django, React, PostgreSQL, Celery, Stripe | 2022 – 2025
+• Processed $18M in wholesale GMV with automated split payouts, dynamic shipping tariffs, and Elasticsearch catalog indexing.
+Low-Latency Collaborative Code Sandbox | Next.js, TypeScript, WebSockets, Docker | 2022 – 2025
+• Scaled browser-based code execution containers for 95,000 monthly learners with sub-200ms startup latency.
+TECHNICAL SKILLS
+• Domain & Technical Expertise: Python, Django, FastAPI, React, Next.js, TypeScript, PostgreSQL, Redis, Docker, AWS
+• Core Competencies: Strategic Planning, Cross-Functional Leadership, Stakeholder Management, Compliance & Reporting
+EDUCATION
+BS Computer Science | PUCIT (University of the Punjab) | 2009 – 2013 | CGPA: 3.77/4.00
+CERTIFICATIONS
+• AWS Certified Solutions Architect – Associate
+• Meta Full-Stack Engineer Certificate
+AWARDS & HONORS
+• Recipient of the Annual CEO Excellence Award at Devsinc for outstanding departmental performance.
+LANGUAGES
+• English (Fluent), Urdu (Native)
